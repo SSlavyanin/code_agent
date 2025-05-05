@@ -11,7 +11,7 @@ from pydantic import BaseModel
 # === Настройка ===
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 AGENT_TYPE = "code"
-BOT_CONTACT = "@your_bot_username"  # Замени на реальный Telegram
+BOT_CONTACT = "@Freelance_mvp_bot"  # Замени на реальный Telegram
 ALLOWED_KEYWORDS = ["бот", "скрипт", "сайт", "парсинг", "scraper", "api", "telegram", "chrome", "python"]
 
 # === Логирование ===
