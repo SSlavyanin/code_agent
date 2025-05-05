@@ -7,6 +7,13 @@ from typing import Dict, Any
 from fastapi import FastAPI, Request, HTTPException
 import httpx
 from pydantic import BaseModel
+from supabase import create_client, Client
+
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")  # 👈 добавь
+SUPABASE_KEY = os.getenv("SUPABASE_API_KEY")  # 👈 добавь
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)  # 👈 добавь
+
 
 # === Настройка ===
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
@@ -32,10 +39,12 @@ class Order(BaseModel):
     description: str
     contact: str = ""
 
+
 # === Хелпер: Проверка на ключевые слова ===
 def is_relevant_task(text: str) -> bool:
     text = text.lower()
     return any(keyword in text for keyword in ALLOWED_KEYWORDS)
+
 
 # === Хелпер: Генерация ответа через OpenRouter ===
 async def generate_response_via_openrouter(description: str) -> str:
@@ -70,15 +79,20 @@ async def generate_response_via_openrouter(description: str) -> str:
         logger.error(f"LLM error: {e}")
         return f"Здравствуйте! Ознакомился с заданием. Готов выполнить. Мой Telegram: {BOT_CONTACT}"
 
+
 # === Эндпоинт приёма заказа ===
 @app.post("/handle_order")
 async def handle_order(order: Order) -> Dict[str, Any]:
     logger.info(f"Получен заказ: {order.id} — {order.title}")
 
-    # Защита от дублей
-    if order.id in processed_ids:
-        logger.info(f"Повторный заказ пропущен: {order.id}")
-        return {"status": "duplicate", "response": ""}
+    # Проверка в Supabase на наличие отклика
+    try:
+        existing = supabase.table("orders").select("response").eq("id", order.id).execute()
+        if existing.data and existing.data[0].get("response"):
+            logger.info(f"Повторный заказ (уже есть ответ) в Supabase: {order.id}")
+            return {"status": "duplicate", "response": ""}
+    except Exception as e:
+        logger.error(f"Ошибка при проверке дубля в Supabase: {e}")
 
     # Фильтрация
     if not is_relevant_task(order.title + " " + order.description):
@@ -87,6 +101,17 @@ async def handle_order(order: Order) -> Dict[str, Any]:
 
     # Генерация отклика
     reply = await generate_response_via_openrouter(order.description)
+    
+    # Сохраняем отклик в Supabase
+    try:
+        supabase.table("orders").update({
+            "response": reply,
+            "status": "replied"
+        }).eq("id", order.id).execute()
+        logger.info(f"Отклик сохранён в Supabase для заказа {order.id}")
+    except Exception as e:
+        logger.warning(f"Не удалось сохранить отклик в Supabase: {e}")
+
     processed_ids.add(order.id)
 
     logger.info(f"Сгенерирован отклик для {order.id}")
@@ -95,6 +120,7 @@ async def handle_order(order: Order) -> Dict[str, Any]:
         "agent": AGENT_TYPE,
         "response": reply
     }
+
 
 # === Пинг для проверки ===
 @app.get("/ping")
